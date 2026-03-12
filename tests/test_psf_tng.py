@@ -122,11 +122,12 @@ def test_tng_velocity_with_psf(tng_generator, tng_config, tng_psf, output_dir):
     # without PSF
     velocity_no_psf, _ = tng_generator.generate_velocity_map(tng_config)
 
-    # with PSF -- need intensity for flux weighting
+    # with PSF -- use pre-PSF intensity for flux weighting
     config_psf = replace(tng_config, psf=tng_psf)
-    intensity_psf, _ = tng_generator.generate_intensity_map(config_psf)
+    config_no_psf = replace(config_psf, psf=None)
+    intensity_no_psf_for_weight, _ = tng_generator.generate_intensity_map(config_no_psf)
     velocity_psf, _ = tng_generator.generate_velocity_map(
-        config_psf, intensity_map=intensity_psf
+        config_psf, intensity_map=intensity_no_psf_for_weight
     )
 
     # PSF should reduce velocity extremes (smoother)

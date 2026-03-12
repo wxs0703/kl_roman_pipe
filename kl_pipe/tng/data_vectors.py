@@ -92,7 +92,7 @@ This avoids negative cos(i) in projection math.
 
 from typing import Dict, Optional, Tuple
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from astropy.cosmology import FlatLambdaCDM
 from astropy import units as u
 
@@ -1018,6 +1018,11 @@ class TNGDataVectorGenerator:
             Signal-to-noise ratio for noise addition. If None, no noise added.
         seed : int, optional
             Random seed for noise generation
+        intensity_map : np.ndarray, optional
+            Intensity map used for flux-weighted PSF convolution. This should be a
+            pre-PSF, noiseless map on the same grid as the velocity map. Passing a
+            PSF-convolved or noisy intensity map can over-broaden velocity fields and
+            introduce artifacts.
 
         Returns
         -------
@@ -1127,14 +1132,15 @@ class TNGDataVectorGenerator:
             if intensity_map is None:
                 warnings.warn(
                     "PSF set but no intensity_map provided to generate_velocity_map. "
-                    "Generating intensity internally (less efficient).",
+                    "Generating a pre-PSF, noiseless intensity map internally.",
                     stacklevel=2,
                 )
-                intensity_map, _ = self.generate_intensity_map(config, snr=None)
+                # Build intensity map without PSF to avoid double-convolving the
+                # flux weights in v_obs = Conv(I*v) / Conv(I).
+                config_no_psf = replace(config, psf=None)
+                intensity_map, _ = self.generate_intensity_map(config_no_psf, snr=None)
 
-            # Flux weighting assumes non-negative intensity. If a noisy map is
-            # passed (e.g. from generate_intensity_map with snr set), negative
-            # pixels can make the denominator unstable and blow up velocities.
+            # Flux weighting assumes non-negative, finite intensity on matching grid.
             intensity_map = np.asarray(intensity_map, dtype=np.float64)
             if intensity_map.shape != velocity.shape:
                 raise ValueError(
@@ -1148,7 +1154,7 @@ class TNGDataVectorGenerator:
                 warnings.warn(
                     "intensity_map has negative values. Clipping to zero before "
                     "flux-weighted PSF convolution to avoid unstable velocities. "
-                    "For best results, pass a noiseless intensity map.",
+                    "For best results, pass a noiseless pre-PSF intensity map.",
                     stacklevel=2,
                 )
                 intensity_map = np.clip(intensity_map, 0.0, None)

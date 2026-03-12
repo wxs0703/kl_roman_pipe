@@ -376,6 +376,7 @@ def convolve_flux_weighted(
     intensity: jnp.ndarray,
     psf_data: PSFData,
     epsilon: float = 1e-10,
+    epsilon_rel: float = 1e-6,
 ) -> jnp.ndarray:
     """
     Flux-weighted velocity PSF convolution.
@@ -396,23 +397,33 @@ def convolve_flux_weighted(
         Pre-computed PSF.
     epsilon : float
         Floor to prevent division by zero / NaN gradients.
+    epsilon_rel : float
+        Relative denominator floor as a fraction of max(Conv(I, PSF)).
+        Helps suppress edge artifacts where flux is extremely low.
 
     Returns
     -------
     jnp.ndarray
         Flux-weighted, PSF-convolved velocity map, shape == psf_data.coarse_shape.
     """
-    conv_iv = _convolve_fft_raw(intensity * velocity, psf_data)
-    conv_i = _convolve_fft_raw(intensity, psf_data)
+    # Scale-normalize intensity for numerical stability. The ratio
+    # Conv((aI)*v)/Conv(aI) is invariant to positive scalar a.
+    I_scale = jnp.maximum(jnp.max(jnp.abs(intensity)), 1.0)
+    intensity_scaled = intensity / I_scale
+
+    conv_iv = _convolve_fft_raw(intensity_scaled * velocity, psf_data)
+    conv_i = _convolve_fft_raw(intensity_scaled, psf_data)
+
+    den_floor = jnp.maximum(epsilon, epsilon_rel * jnp.max(conv_i))
 
     if psf_data.oversample > 1:
         N = psf_data.oversample
         Nrow_c, Ncol_c = psf_data.coarse_shape
         num = conv_iv.reshape(Nrow_c, N, Ncol_c, N).sum(axis=(1, 3))
         den = conv_i.reshape(Nrow_c, N, Ncol_c, N).sum(axis=(1, 3))
-        return num / jnp.maximum(den, epsilon)
+        return num / jnp.maximum(den, den_floor)
     else:
-        return conv_iv / jnp.maximum(conv_i, epsilon)
+        return conv_iv / jnp.maximum(conv_i, den_floor)
 
 
 # ==============================================================================
@@ -461,6 +472,7 @@ def convolve_flux_weighted_numpy(
     kernel: np.ndarray,
     padded_shape: tuple,
     epsilon: float = 1e-10,
+    epsilon_rel: float = 1e-6,
 ) -> np.ndarray:
     """
     Numpy version of convolve_flux_weighted for synthetic data generation.
@@ -477,16 +489,25 @@ def convolve_flux_weighted_numpy(
         (Nrow_pad, Ncol_pad).
     epsilon : float
         Floor to prevent division by zero.
+    epsilon_rel : float
+        Relative denominator floor as a fraction of max(Conv(I, PSF)).
+        Helps suppress edge artifacts where flux is extremely low.
 
     Returns
     -------
     np.ndarray
         Flux-weighted, PSF-convolved velocity map.
     """
-    conv_iv = convolve_fft_numpy(intensity * velocity, kernel, padded_shape)
-    conv_i = convolve_fft_numpy(intensity, kernel, padded_shape)
+    # Scale-normalize intensity for numerical stability. The ratio is
+    # invariant under I -> aI for any positive scalar a.
+    I_scale = max(np.max(np.abs(intensity)), 1.0)
+    intensity_scaled = intensity / I_scale
 
-    return conv_iv / np.maximum(conv_i, epsilon)
+    conv_iv = convolve_fft_numpy(intensity_scaled * velocity, kernel, padded_shape)
+    conv_i = convolve_fft_numpy(intensity_scaled, kernel, padded_shape)
+
+    den_floor = max(epsilon, epsilon_rel * np.max(conv_i))
+    return conv_iv / np.maximum(conv_i, den_floor)
 
 
 # ==============================================================================

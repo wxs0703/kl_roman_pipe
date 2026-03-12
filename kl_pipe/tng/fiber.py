@@ -12,7 +12,7 @@ Design goals:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Union
 
@@ -340,11 +340,24 @@ class FiberSpectraSimulator:
             Existing rendering config for transformations/projection.
         """
 
+        # Build the observed intensity map for fiber flux extraction.
         intensity_map, _ = generator.generate_intensity_map(
             render_config, snr=intensity_snr, seed=seed
         )
+
+        # Build a separate pre-PSF, noiseless intensity map for flux-weighted
+        # velocity PSF convolution: v_obs = Conv(I*v) / Conv(I).
+        # Using observed/noisy I here can over-broaden or destabilize v_obs.
+        weight_config = replace(render_config, psf=None)
+        intensity_weight_map, _ = generator.generate_intensity_map(
+            weight_config, snr=None
+        )
+
         velocity_map, _ = generator.generate_velocity_map(
-            render_config, snr=velocity_snr, seed=seed, intensity_map=intensity_map
+            render_config,
+            snr=velocity_snr,
+            seed=seed,
+            intensity_map=intensity_weight_map,
         )
 
         return self.simulate_from_maps(
